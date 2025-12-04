@@ -28,7 +28,51 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.future import select
 from sqlalchemy.orm import sessionmaker
 
-from models import Base, Todo
+from models.base import Base
+from models.todo import Todo
+
+# Step 5: Define what our API requests and responses will look like
+# These are called "Pydantic models" or "schemas"
+# They define the structure of data that will be sent to and from the API
+
+class TodoBase(BaseModel):
+    """Base schema with common fields for todos"""
+
+    title: str
+    description: Optional[str] = None
+    completed: bool = False
+
+
+class TodoCreate(TodoBase):
+    """Schema for creating a new todo"""
+
+    pass
+
+
+class TodoUpdate(BaseModel):
+    """Schema for updating a todo - all fields optional"""
+
+    title: Optional[str] = None
+    description: Optional[str] = None
+    completed: Optional[bool] = None
+
+
+class TodoResponse(TodoBase):
+    """What a todo looks like when we send it back to the client"""
+
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    # This tells Pydantic to automatically convert SQLAlchemy models
+    # (like our Todo model) into this Pydantic model
+    class Config:
+        from_attributes = True
+
+
+# Step 6: Create the FastAPI app
+# This is the main application object - it handles all incoming requests
+app = FastAPI(title="TODO API", description="A simple CRUD API for managing TODO items")
 
 # Step 2: Load environment variables from .env file
 # Looks for .env file in current directory and parent directories
@@ -65,14 +109,6 @@ async def get_db():
         yield session  # Give the session to the endpoint
         # After the endpoint finishes, the session is automatically closed
 
-# Step 5: Define what our API requests and responses will look like
-# These are called "Pydantic models" or "schemas"
-# They define the structure of data that will be sent to and from the API
-
-# Step 6: Create the FastAPI app
-# This is the main application object - it handles all incoming requests
-app = FastAPI(title="TODO API", description="A simple CRUD API for managing TODO items")
-
 # Step 7: Create database tables on startup
 # This automatically creates all tables defined in your SQLAlchemy models
 @app.on_event("startup")
@@ -107,7 +143,6 @@ app.add_middleware(
 # Step 9: Create our API endpoints
 # These are the URLs that clients can visit to interact with todos
 # IMPORTANT: API routes must be defined BEFORE the SPA catch-all route
-
 
 # READ: Get all todos
 @app.get("/todos", response_model=List[TodoResponse])
@@ -146,22 +181,17 @@ async def create_todo(todo: TodoCreate, db: AsyncSession = Depends(get_db)):
 
     Returns: The created todo
     """
-    # Create a new Todo object from the request data
     db_todo = Todo(
         title=todo.title,
         description=todo.description,
         completed=todo.completed,
     )
 
-    # Add it to the database session
     db.add(db_todo)
-    # Commit the transaction to save it
     await db.commit()
-    # Refresh to get the updated data (like the generated ID)
     await db.refresh(db_todo)
 
     return db_todo
-
 
 # Step 11: 
 # UPDATE: Update an existing todo (PATCH - partial update)
@@ -174,22 +204,18 @@ async def patch_todo(
     Only the fields provided in the request will be updated.
     Returns: The updated todo, or a 404 error if not found
     """
-    # Get the existing todo
     result = await db.execute(select(Todo).where(Todo.id == todo_id))
     db_todo = result.scalar_one_or_none()
 
     if db_todo is None:
         raise HTTPException(status_code=404, detail=f"Todo with ID {todo_id} not found")
 
-    # Update only the fields that were provided
     update_data = todo_update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(db_todo, field, value)
 
-    # Update the updated_at timestamp
     db_todo.updated_at = datetime.utcnow()
 
-    # Commit the changes
     await db.commit()
     await db.refresh(db_todo)
 
@@ -203,33 +229,26 @@ async def delete_todo(todo_id: int, db: AsyncSession = Depends(get_db)):
 
     Returns: 204 No Content if successful, or a 404 error if not found
     """
-    # Get the existing todo
     result = await db.execute(select(Todo).where(Todo.id == todo_id))
     db_todo = result.scalar_one_or_none()
 
     if db_todo is None:
         raise HTTPException(status_code=404, detail=f"Todo with ID {todo_id} not found")
 
-    # Delete it from the database
     await db.delete(db_todo)
     await db.commit()
 
     return None
 
 # Step 13: Serve static files (frontend) in production
-# This must come AFTER all API routes so API routes are matched first
-# Check if static directory exists (production build)
 static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
 if os.path.exists(static_dir):
-    # Mount static files (CSS, JS, images, etc.)
     app.mount(
         "/assets",
         StaticFiles(directory=os.path.join(static_dir, "assets")),
         name="assets",
     )
 
-    # Serve index.html for all non-API routes (SPA routing)
-    # This catch-all route must be last so API routes take precedence
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
         """
@@ -242,50 +261,6 @@ if os.path.exists(static_dir):
         raise HTTPException(status_code=404, detail="Frontend not found")
 
 # Step 14: Run the server
-# This code only runs if you execute the file directly (not if imported)
 if __name__ == "__main__":
     import uvicorn
-
-    # uvicorn is the web server that runs FastAPI
-    # --reload means it will restart when you change the code
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
-
-# Note: The server will be run in Docker (see Docker Configuration section)
-# If you have Poetry installed locally, you can also run:
-# poetry run uvicorn server:app --reload
-
-
-class TodoBase(BaseModel):
-    """Base schema with common fields for todos"""
-
-    title: str
-    description: Optional[str] = None
-    completed: bool = False
-
-
-class TodoCreate(TodoBase):
-    """Schema for creating a new todo"""
-
-    pass
-
-
-class TodoUpdate(BaseModel):
-    """Schema for updating a todo - all fields optional"""
-
-    title: Optional[str] = None
-    description: Optional[str] = None
-    completed: Optional[bool] = None
-
-
-class TodoResponse(TodoBase):
-    """What a todo looks like when we send it back to the client"""
-
-    id: int
-    created_at: datetime
-    updated_at: datetime
-
-    # This tells Pydantic to automatically convert SQLAlchemy models
-    # (like our Todo model) into this Pydantic model
-    class Config:
-        from_attributes = True
