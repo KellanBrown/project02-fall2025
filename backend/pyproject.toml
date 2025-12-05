@@ -17,6 +17,7 @@ python-dotenv = "*"
 black = "^25.11.0"
 isort = "^7.0.0"
 flake8 = "^7.3.0"
+package-name = "^0.1"
 
 [build-system]
 requires = ["poetry-core"]

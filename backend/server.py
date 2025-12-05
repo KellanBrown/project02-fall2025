@@ -35,6 +35,7 @@ from models.todo import Todo
 # These are called "Pydantic models" or "schemas"
 # They define the structure of data that will be sent to and from the API
 
+
 class TodoBase(BaseModel):
     """Base schema with common fields for todos"""
 
@@ -91,6 +92,7 @@ engine = create_async_engine(DATABASE_URL, echo=False)
 # Each request will get its own session to query the database
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
+
 # Step 4: Create a function to get database sessions
 # This is called a "dependency" - FastAPI will automatically call this
 # for each request and pass the result to your endpoint functions
@@ -109,6 +111,7 @@ async def get_db():
         yield session  # Give the session to the endpoint
         # After the endpoint finishes, the session is automatically closed
 
+
 # Step 7: Create database tables on startup
 # This automatically creates all tables defined in your SQLAlchemy models
 @app.on_event("startup")
@@ -125,6 +128,7 @@ async def create_tables():
         # Use run_sync to run the synchronous create_all method
         await conn.run_sync(Base.metadata.create_all)
     print("✅ Database tables created successfully")
+
 
 # Step 8: Add CORS middleware to allow frontend requests
 # CORS (Cross-Origin Resource Sharing) is needed because your React app
@@ -144,6 +148,7 @@ app.add_middleware(
 # These are the URLs that clients can visit to interact with todos
 # IMPORTANT: API routes must be defined BEFORE the SPA catch-all route
 
+
 # READ: Get all todos
 @app.get("/todos", response_model=List[TodoResponse])
 async def get_all_todos(db: AsyncSession = Depends(get_db)):
@@ -155,6 +160,7 @@ async def get_all_todos(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Todo))
     todos = result.scalars().all()
     return todos
+
 
 # READ: Get a single todo by ID
 @app.get("/todos/{todo_id}", response_model=TodoResponse)
@@ -172,7 +178,8 @@ async def get_todo(todo_id: int, db: AsyncSession = Depends(get_db)):
 
     return todo
 
-# Step 10: 
+
+# Step 10:
 # CREATE: Create a new todo
 @app.post("/todos", response_model=TodoResponse, status_code=201)
 async def create_todo(todo: TodoCreate, db: AsyncSession = Depends(get_db)):
@@ -193,7 +200,8 @@ async def create_todo(todo: TodoCreate, db: AsyncSession = Depends(get_db)):
 
     return db_todo
 
-# Step 11: 
+
+# Step 11:
 # UPDATE: Update an existing todo (PATCH - partial update)
 @app.patch("/todos/{todo_id}", response_model=TodoResponse)
 async def patch_todo(
@@ -221,6 +229,7 @@ async def patch_todo(
 
     return db_todo
 
+
 # Step 12: DELETE: Delete a todo
 @app.delete("/todos/{todo_id}", status_code=204)
 async def delete_todo(todo_id: int, db: AsyncSession = Depends(get_db)):
@@ -239,6 +248,7 @@ async def delete_todo(todo_id: int, db: AsyncSession = Depends(get_db)):
     await db.commit()
 
     return None
+
 
 # Step 13: Serve static files (frontend) in production
 static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
@@ -260,7 +270,9 @@ if os.path.exists(static_dir):
             return FileResponse(index_path)
         raise HTTPException(status_code=404, detail="Frontend not found")
 
+
 # Step 14: Run the server
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)
