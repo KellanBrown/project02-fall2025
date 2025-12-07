@@ -4,20 +4,22 @@ version = "0.1.0"
 description = ""
 authors = ["Your Name <you@example.com>"]
 readme = "README.md"
-package-mode = false
+packages = [{ include = "server" }, { include = "models" }]
 
 [tool.poetry.dependencies]
 python = "^3.11"
-sqlalchemy = {extras = ["asyncio"], version = "^2.0.29"}
+sqlalchemy = { extras = ["asyncio"], version = "^2.0.29" }
 asyncpg = "*"
 fastapi = "*"
-uvicorn = {extras = ["standard"], version = "*"}
+uvicorn = { extras = ["standard"], version = "*" }
 pydantic = "^2.0"
 python-dotenv = "*"
+
+[tool.poetry.dev-dependencies]
 black = "^25.11.0"
 isort = "^7.0.0"
 flake8 = "^7.3.0"
-package-name = "^0.1"
+
 
 [build-system]
 requires = ["poetry-core"]

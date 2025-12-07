@@ -2,27 +2,15 @@
 Simple FastAPI Starter - TODO API
 ==================================
 
-This is a minimal FastAPI example, designed for beginners.
-It shows the basic structure of a REST API with database access.
-
-HOW IT WORKS:
-1. Client (your React app) makes a request to a URL (e.g., /todos)
-2. FastAPI finds the function decorated with @app.get("/todos")
-3. That function uses the database connection to query data
-4. The function returns data, which FastAPI converts to JSON
-5. The JSON is sent back to the client
+Minimal FastAPI example for a TODO app with SQLite.
 """
 
-# Step 1: Import what we need
-import os
 from datetime import datetime
 from typing import List, Optional
 
-from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
+
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.future import select
@@ -30,249 +18,169 @@ from sqlalchemy.orm import sessionmaker
 
 from models.base import Base
 from models.todo import Todo
+from models.category import Category
 
-# Step 5: Define what our API requests and responses will look like
-# These are called "Pydantic models" or "schemas"
-# They define the structure of data that will be sent to and from the API
+# --------------------------
+# DATABASE SETUP (SQLite for local dev)
+# --------------------------
+DATABASE_URL = "sqlite+aiosqlite:///./data.db"
 
+engine = create_async_engine(DATABASE_URL, echo=True)
+AsyncSessionLocal = sessionmaker(
+    engine, class_=AsyncSession, expire_on_commit=False
+)
 
-class TodoBase(BaseModel):
-    """Base schema with common fields for todos"""
+async def get_db():
+    async with AsyncSessionLocal() as session:
+        yield session
 
-    title: str
-    description: Optional[str] = None
-    completed: bool = False
-
-
-class TodoCreate(TodoBase):
-    """Schema for creating a new todo"""
-
-    pass
-
-
-class TodoUpdate(BaseModel):
-    """Schema for updating a todo - all fields optional"""
-
-    title: Optional[str] = None
-    description: Optional[str] = None
-    completed: Optional[bool] = None
-
-
-class TodoResponse(TodoBase):
-    """What a todo looks like when we send it back to the client"""
-
-    id: int
-    created_at: datetime
-    updated_at: datetime
-
-    # This tells Pydantic to automatically convert SQLAlchemy models
-    # (like our Todo model) into this Pydantic model
-    class Config:
-        from_attributes = True
-
-
-# Step 6: Create the FastAPI app
-# This is the main application object - it handles all incoming requests
+# --------------------------
+# FASTAPI APP SETUP
+# --------------------------
 app = FastAPI(title="TODO API", description="A simple CRUD API for managing TODO items")
 
-# Step 2: Load environment variables from .env file
-# Looks for .env file in current directory and parent directories
-load_dotenv()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# Step 3: Connect to the database
-# Get DATABASE_URL from environment variable, fallback to local development
-# Format: postgresql+asyncpg://username:password@host:port/database_name
-DATABASE_URL = os.getenv("DATABASE_URL")
-
-# Create the database engine - this manages the connection pool
-# Think of it as a "factory" that creates database connections
-engine = create_async_engine(DATABASE_URL, echo=False)
-
-# Create a session factory - this creates individual database sessions
-# Each request will get its own session to query the database
-AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-
-# Step 4: Create a function to get database sessions
-# This is called a "dependency" - FastAPI will automatically call this
-# for each request and pass the result to your endpoint functions
-async def get_db():
-    """
-    Generator function that yields a database session.
-
-    The 'yield' keyword is special - it:
-    1. Creates a session when the function is called
-    2. Gives it to your endpoint function
-    3. Closes the session when the endpoint finishes
-
-    This ensures database connections are properly cleaned up.
-    """
-    async with AsyncSessionLocal() as session:
-        yield session  # Give the session to the endpoint
-        # After the endpoint finishes, the session is automatically closed
-
-
-# Step 7: Create database tables on startup
-# This automatically creates all tables defined in your SQLAlchemy models
 @app.on_event("startup")
 async def create_tables():
-    """
-    Create all database tables on application startup.
-    This uses SQLAlchemy to generate tables from your model definitions.
-    Works for both Docker and Railway databases.
-
-    Note: Docker Compose's depends_on: service_healthy ensures the database
-    is ready before this code runs.
-    """
     async with engine.begin() as conn:
-        # Use run_sync to run the synchronous create_all method
         await conn.run_sync(Base.metadata.create_all)
     print("✅ Database tables created successfully")
 
+# --------------------------
+# SCHEMAS
+# --------------------------
+class TodoBase(BaseModel):
+    title: str
+    description: Optional[str] = None
+    completed: bool = False
+    due_date: Optional[datetime] = None
 
-# Step 8: Add CORS middleware to allow frontend requests
-# CORS (Cross-Origin Resource Sharing) is needed because your React app
-# runs on a different port (5173) than your API (8000)
-# Without this, browsers would block requests from your frontend
-# Note: In production with combined deployment, CORS may not be needed
-# but we keep it for development flexibility
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins (in production, specify exact URLs)
-    allow_credentials=True,
-    allow_methods=["*"],  # Allows all HTTP methods (GET, POST, etc.)
-    allow_headers=["*"],  # Allows all headers
-)
+class TodoCreate(TodoBase):
+    category_id: Optional[int] = None
 
-# Step 9: Create our API endpoints
-# These are the URLs that clients can visit to interact with todos
-# IMPORTANT: API routes must be defined BEFORE the SPA catch-all route
+class TodoUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    completed: Optional[bool] = None
+    category_id: Optional[int] = None
+    due_date: Optional[datetime] = None
 
+class CategoryBase(BaseModel):
+    name: str
 
-# READ: Get all todos
+class CategoryCreate(CategoryBase):
+    pass
+
+class CategoryResponse(CategoryBase):
+    id: int
+    class Config:
+        from_attributes = True  # updated for Pydantic v2
+
+class TodoResponse(TodoBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+    category: Optional[CategoryResponse] = None
+    class Config:
+        from_attributes = True  # updated for Pydantic v2
+
+# --------------------------
+# TODO ROUTES
+# --------------------------
 @app.get("/todos", response_model=List[TodoResponse])
 async def get_all_todos(db: AsyncSession = Depends(get_db)):
-    """
-    Get all todos from the database.
-
-    Returns: A list of all todos in the database
-    """
     result = await db.execute(select(Todo))
-    todos = result.scalars().all()
-    return todos
+    return result.scalars().all()
 
-
-# READ: Get a single todo by ID
 @app.get("/todos/{todo_id}", response_model=TodoResponse)
 async def get_todo(todo_id: int, db: AsyncSession = Depends(get_db)):
-    """
-    Get a single todo by its ID.
-
-    Returns: The todo if found, or a 404 error if not
-    """
     result = await db.execute(select(Todo).where(Todo.id == todo_id))
     todo = result.scalar_one_or_none()
-
-    if todo is None:
-        raise HTTPException(status_code=404, detail=f"Todo with ID {todo_id} not found")
-
+    if not todo:
+        raise HTTPException(status_code=404, detail=f"Todo {todo_id} not found")
     return todo
 
-
-# Step 10:
-# CREATE: Create a new todo
 @app.post("/todos", response_model=TodoResponse, status_code=201)
 async def create_todo(todo: TodoCreate, db: AsyncSession = Depends(get_db)):
-    """
-    Create a new todo item.
-
-    Returns: The created todo
-    """
     db_todo = Todo(
         title=todo.title,
         description=todo.description,
         completed=todo.completed,
+        category_id=todo.category_id
     )
-
     db.add(db_todo)
     await db.commit()
     await db.refresh(db_todo)
-
     return db_todo
 
-
-# Step 11:
-# UPDATE: Update an existing todo (PATCH - partial update)
 @app.patch("/todos/{todo_id}", response_model=TodoResponse)
-async def patch_todo(
-    todo_id: int, todo_update: TodoUpdate, db: AsyncSession = Depends(get_db)
-):
-    """
-    Partially update an existing todo item (PATCH).
-    Only the fields provided in the request will be updated.
-    Returns: The updated todo, or a 404 error if not found
-    """
+async def patch_todo(todo_id: int, todo_update: TodoUpdate, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Todo).where(Todo.id == todo_id))
     db_todo = result.scalar_one_or_none()
-
-    if db_todo is None:
-        raise HTTPException(status_code=404, detail=f"Todo with ID {todo_id} not found")
-
+    if not db_todo:
+        raise HTTPException(status_code=404, detail=f"Todo {todo_id} not found")
     update_data = todo_update.model_dump(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(db_todo, field, value)
-
+    for key, value in update_data.items():
+        setattr(db_todo, key, value)
     db_todo.updated_at = datetime.utcnow()
-
     await db.commit()
     await db.refresh(db_todo)
-
     return db_todo
 
-
-# Step 12: DELETE: Delete a todo
 @app.delete("/todos/{todo_id}", status_code=204)
 async def delete_todo(todo_id: int, db: AsyncSession = Depends(get_db)):
-    """
-    Delete a todo item.
-
-    Returns: 204 No Content if successful, or a 404 error if not found
-    """
     result = await db.execute(select(Todo).where(Todo.id == todo_id))
     db_todo = result.scalar_one_or_none()
-
-    if db_todo is None:
-        raise HTTPException(status_code=404, detail=f"Todo with ID {todo_id} not found")
-
+    if not db_todo:
+        raise HTTPException(status_code=404, detail=f"Todo {todo_id} not found")
     await db.delete(db_todo)
     await db.commit()
-
     return None
 
+# --------------------------
+# CATEGORY ROUTES
+# --------------------------
+@app.get("/categories", response_model=List[CategoryResponse])
+async def get_all_categories(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Category))
+    return result.scalars().all()
 
-# Step 13: Serve static files (frontend) in production
-static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
-if os.path.exists(static_dir):
-    app.mount(
-        "/assets",
-        StaticFiles(directory=os.path.join(static_dir, "assets")),
-        name="assets",
-    )
+@app.get("/categories/{category_id}", response_model=CategoryResponse)
+async def get_category(category_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Category).where(Category.id == category_id))
+    category = result.scalar_one_or_none()
+    if not category:
+        raise HTTPException(status_code=404, detail=f"Category {category_id} not found")
+    return category
 
-    @app.get("/{full_path:path}")
-    async def serve_spa(full_path: str):
-        """
-        Serve the React app for all non-API routes.
-        This allows React Router to handle client-side routing.
-        """
-        index_path = os.path.join(static_dir, "index.html")
-        if os.path.exists(index_path):
-            return FileResponse(index_path)
-        raise HTTPException(status_code=404, detail="Frontend not found")
+@app.post("/categories", response_model=CategoryResponse, status_code=201)
+async def create_category(category: CategoryCreate, db: AsyncSession = Depends(get_db)):
+    db_category = Category(name=category.name)
+    db.add(db_category)
+    await db.commit()
+    await db.refresh(db_category)
+    return db_category
 
+@app.delete("/categories/{category_id}", status_code=204)
+async def delete_category(category_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Category).where(Category.id == category_id))
+    db_category = result.scalar_one_or_none()
+    if not db_category:
+        raise HTTPException(status_code=404, detail=f"Category {category_id} not found")
+    await db.delete(db_category)
+    await db.commit()
+    return None
 
-# Step 14: Run the server
+# --------------------------
+# RUN SERVER LOCALLY
+# --------------------------
 if __name__ == "__main__":
     import uvicorn
-
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)

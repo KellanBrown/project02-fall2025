@@ -15,7 +15,7 @@ RUN pip install poetry
 # Configure Poetry to not create virtual environments (we're in Docker)
 RUN poetry config virtualenvs.create false
 
-# Copy dependency files
+# Copy dependency files first to leverage Docker cache
 COPY pyproject.toml poetry.lock* ./
 
 # Install dependencies
@@ -27,5 +27,5 @@ COPY . .
 # Expose the port FastAPI runs on
 EXPOSE 8000
 
-# Default command (can be overridden in docker-compose.yaml)
+# Default command to run the FastAPI app
 CMD ["poetry", "run", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]
